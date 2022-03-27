@@ -1,0 +1,4 @@
+VOCdevkit/
+__pycache__/
+*.tar
+*.json
