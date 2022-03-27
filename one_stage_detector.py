@@ -388,7 +388,24 @@ def fcos_apply_deltas_to_locations(
     # box. Make sure to clip them to zero.                                   #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    l = deltas[:, 0]
+    t = deltas[:, 1]
+    r = deltas[:, 2]
+    b = deltas[:, 3]
+    xc = locations[:, 0]
+    yc = locations[:, 1]
+
+    x1 = xc - l * stride
+    y1 = yc - t * stride
+    x2 = xc + r * stride
+    y2 = yc + b * stride
+    
+    output_boxes = torch.stack((x1, y1, x2, y2)).t()
+    
+    mask = (deltas < 0 )
+    temp = torch.cat((locations, locations), 1)
+    output_boxes[mask] = temp[mask]
+    
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
