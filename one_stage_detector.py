@@ -402,7 +402,7 @@ def fcos_apply_deltas_to_locations(
     
     output_boxes = torch.stack((x1, y1, x2, y2)).t()
     
-    mask = (deltas < 0 )
+    mask = (deltas < 0)
     temp = torch.cat((locations, locations), 1)
     output_boxes[mask] = temp[mask]
     
@@ -435,7 +435,19 @@ def fcos_make_centerness_targets(deltas: torch.Tensor):
     ##########################################################################
     centerness = None
     # Replace "pass" statement with your code
-    pass
+    l = deltas[:, 0]
+    t = deltas[:, 1]
+    r = deltas[:, 2]
+    b = deltas[:, 3]
+
+    min_lr = torch.minimum(l, r)
+    min_tb = torch.minimum(t, b)
+    max_lr = torch.maximum(l, r)
+    max_tb = torch.maximum(t, b)
+
+    centerness = torch.sqrt(min_lr * min_tb / (max_lr * max_tb))
+    mask = (l < 0)
+    centerness[mask] = -1.0
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
