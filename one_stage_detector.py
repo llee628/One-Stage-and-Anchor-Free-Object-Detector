@@ -1,3 +1,4 @@
+from bdb import set_trace
 import math
 from typing import Dict, List, Optional
 
@@ -326,8 +327,9 @@ def fcos_get_deltas_from_locations(
     deltas = None
 
     # Replace "pass" statement with your code
+    device = locations.device
     N = locations.shape[0]
-    deltas = torch.zeros(N, 4)
+    deltas = torch.zeros(N, 4, device=device)
     xc = locations[:, 0]
     yc = locations[:, 1]
     x1 = gt_boxes[:, 0]
@@ -435,6 +437,7 @@ def fcos_make_centerness_targets(deltas: torch.Tensor):
     ##########################################################################
     centerness = None
     # Replace "pass" statement with your code
+    device = deltas.device
     l = deltas[:, 0]
     t = deltas[:, 1]
     r = deltas[:, 2]
@@ -446,6 +449,7 @@ def fcos_make_centerness_targets(deltas: torch.Tensor):
     max_tb = torch.maximum(t, b)
 
     centerness = torch.sqrt(min_lr * min_tb / (max_lr * max_tb))
+    centerness = centerness.to(device)
     mask = (l < 0)
     centerness[mask] = -1.0
     ##########################################################################
@@ -477,7 +481,12 @@ class FCOS(nn.Module):
         self.backbone = None
         self.pred_net = None
         # Replace "pass" statement with your code
-        pass
+        self.backbone = DetectorBackboneWithFPN(out_channels=fpn_channels)
+        self.pred_net = FCOSPredictionNetwork(
+            num_classes=num_classes, 
+            in_channels=fpn_channels, 
+            stem_channels=stem_channels
+        )
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -521,7 +530,8 @@ class FCOS(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         pred_cls_logits, pred_boxreg_deltas, pred_ctr_logits = None, None, None
         # Replace "pass" statement with your code
-        pass
+        fpn_feats = self.backbone(images)
+        pred_cls_logits, pred_boxreg_deltas, pred_ctr_logits = self.pred_net(fpn_feats)
 
         ######################################################################
         # TODO: Get absolute co-ordinates `(xc, yc)` for every location in
@@ -533,7 +543,16 @@ class FCOS(nn.Module):
         # Feel free to delete this line: (but keep variable names same)
         locations_per_fpn_level = None
         # Replace "pass" statement with your code
-        pass
+        device = images.device
+        
+        # Get shapes of each FPN level feature map.
+        fpn_feats_shapes = {
+            level_name: feat.shape for level_name, feat in fpn_feats.items()
+        }
+
+        locations_per_fpn_level = get_fpn_location_coords(
+                fpn_feats_shapes, self.backbone.fpn_strides, device=device
+        )
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -559,13 +578,32 @@ class FCOS(nn.Module):
         # boxes for locations per FPN level, per image. Fill this list:
         matched_gt_boxes = []
         # Replace "pass" statement with your code
-        pass
+        for gt_boxes_i in gt_boxes:
+            matched_gt_boxes.append(fcos_match_locations_to_gt(
+                    locations_per_fpn_level, 
+                    self.backbone.fpn_strides,
+                    gt_boxes_i
+            ))
 
         # Calculate GT deltas for these matched boxes. Similar structure
         # as `matched_gt_boxes` above. Fill this list:
         matched_gt_deltas = []
         # Replace "pass" statement with your code
-        pass
+        #for i, gt_boxes_i in enumerate(gt_boxes):
+        for matched_gt_boxes_i in matched_gt_boxes:
+            gt_delta_per_fpn_level = {}
+            for level_name, locations in locations_per_fpn_level.items():
+            #for level_name, locations in matched_gt_boxes[i].items():
+                #import pdb; pdb.set_trace()
+                gt_delta_per_fpn_level[level_name] = fcos_get_deltas_from_locations(
+                        locations, 
+                        matched_gt_boxes_i[level_name], 
+                        stride=self.backbone.fpn_strides[level_name]
+                )
+                #import pdb; pdb.set_trace()
+            
+            matched_gt_deltas.append(gt_delta_per_fpn_level)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -598,7 +636,44 @@ class FCOS(nn.Module):
         loss_cls, loss_box, loss_ctr = None, None, None
 
         # Replace "pass" statement with your code
-        pass
+        
+        # loss_cls
+        # make a one-hot vectors
+        gt_class_tensor = matched_gt_boxes[:, :, 4].clone()
+        gt_class_tensor = gt_class_tensor.to(torch.int64)
+        gt_class_tensor += 1
+        #import pdb; pdb.set_trace()
+        gt_classes = F.one_hot(gt_class_tensor, num_classes=self.num_classes+1) #(B, N, 21)
+        #import pdb; pdb.set_trace()
+        gt_classes = gt_classes.to(matched_gt_boxes.dtype)
+        gt_classes = gt_classes[:,:,1:] # ignore the first index indication background class
+        #import pdb; pdb.set_trace()
+        loss_cls = sigmoid_focal_loss(
+            inputs=pred_cls_logits, targets=gt_classes
+        )
+        #import pdb; pdb.set_trace()
+        # loss_box
+        loss_box = 0.25 * F.l1_loss(
+            pred_boxreg_deltas, matched_gt_deltas, reduction="none"
+        )
+        # no loss for background:
+        loss_box[matched_gt_deltas < 0] *= 0.0
+
+        # calculate centerness loss.
+        B = matched_gt_deltas.shape[0]
+        N = matched_gt_deltas.shape[1]
+        gt_centerness = torch.zeros(B, N, device=device)
+        for i, matched_gt_deltas_i in enumerate(matched_gt_deltas):
+            gt_centerness[i] = fcos_make_centerness_targets(matched_gt_deltas_i)
+        
+        gt_centerness = gt_centerness.view(gt_centerness.shape[0], gt_centerness.shape[1], 1)
+        #import pdb; pdb.set_trace()
+        loss_ctr = F.binary_cross_entropy_with_logits(
+            pred_ctr_logits, gt_centerness, reduction="none"
+        )
+        # No loss for background:
+        loss_ctr[gt_centerness < 0] *= 0.0
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################

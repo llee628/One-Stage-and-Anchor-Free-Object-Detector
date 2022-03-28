@@ -204,9 +204,10 @@ def get_fpn_location_coords(
 
         xc = (xc + 0.5) * level_stride
         yc = (yc + 0.5) * level_stride
-        image_cord = torch.stack((xc, yc))
+        image_cord = torch.stack((yc, xc))
         image_cord = image_cord.view(2, -1)
         image_cord = image_cord.t()
+        image_cord = image_cord.to(device)
 
 
         location_coords[level_name] = image_cord
