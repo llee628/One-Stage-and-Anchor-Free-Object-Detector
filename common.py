@@ -249,7 +249,44 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    device = boxes.device
+    keep = []
+    sort_idxs = torch.argsort(scores)
+    N = boxes.shape[0]
+
+    while (len(sort_idxs) > 0):
+        highest_score_idx = sort_idxs[-1]
+        keep.append(highest_score_idx)
+
+        x1 = boxes[highest_score_idx, 0]
+        y1 = boxes[highest_score_idx, 1]
+        x2 = boxes[highest_score_idx, 2]
+        y2 = boxes[highest_score_idx, 3]
+
+        # find IoU with rest of boxes
+        x1s = boxes[sort_idxs][:, 0]
+        y1s = boxes[sort_idxs][:, 1]
+        x2s = boxes[sort_idxs][:, 2]
+        y2s = boxes[sort_idxs][:, 3]
+        max_x1 = torch.max(x1, boxes[sort_idxs][:, 0])
+        max_y1 = torch.max(y1, boxes[sort_idxs][:, 1])
+        min_x2 = torch.min(x2, boxes[sort_idxs][:, 2])
+        min_y2 = torch.min(y2, boxes[sort_idxs][:, 3])
+
+        #import pdb; pdb.set_trace()
+
+        
+
+        intersection = torch.clamp(min_x2 - max_x1, min=0) * torch.clamp(min_y2 - max_y1, min=0)
+        area_curr = torch.tensor([(x2 - x1) * (y2 - y1)], device=device)
+        areas = (x2s - x1s) * (y2s - y1s)
+        iou = intersection / (area_curr.unsqueeze(1) + areas - intersection)
+
+        # delete the idxs that less than the thres
+        bool_idx = (iou <= iou_threshold)
+        sort_idxs = sort_idxs[bool_idx.squeeze(0)]
+    
+    keep = torch.tensor(keep, dtype=torch.int64, device=device)
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################

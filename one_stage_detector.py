@@ -68,27 +68,40 @@ class FCOSPredictionNetwork(nn.Module):
                 #print("weight:", m.weight)
                 #print("bias", m.bias)
 
-        stem_cls = [
-            nn.Conv2d(in_channels, stem_channels[0], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
-            nn.ReLU(),
-        ]
+        # stem_cls = [
+        #     nn.Conv2d(in_channels, stem_channels[0], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[0], stem_channels[0], 3, padding="same"),
+        #     nn.ReLU(),
+        # ]
+        
+        for i, _ in enumerate(stem_channels):
+            if i == 0:
+                stem_cls.append(nn.Conv2d(in_channels, stem_channels[i], 3, padding="same"))
+                stem_cls.append(nn.ReLU())
+                stem_box.append(nn.Conv2d(in_channels, stem_channels[i], 3, padding="same"))
+                stem_box.append(nn.ReLU())
+            else:
+                stem_cls.append(nn.Conv2d(stem_channels[i-1], stem_channels[i], 3, padding="same"))
+                stem_cls.append(nn.ReLU())
+                stem_box.append(nn.Conv2d(stem_channels[i-1], stem_channels[i], 3, padding="same"))
+                stem_box.append(nn.ReLU())
 
-        stem_box = [
-            nn.Conv2d(in_channels, stem_channels[1], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
-            nn.ReLU(),
-            nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
-            nn.ReLU(),
-        ]
+
+        # stem_box = [
+        #     nn.Conv2d(in_channels, stem_channels[1], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
+        #     nn.ReLU(),
+        #     nn.Conv2d(stem_channels[1], stem_channels[1], 3, padding="same"),
+        #     nn.ReLU(),
+        # ]
 
         # Wrap the layers defined by student into a `nn.Sequential` module:
         self.stem_cls = nn.Sequential(*stem_cls)
@@ -119,9 +132,13 @@ class FCOSPredictionNetwork(nn.Module):
         self.pred_ctr = None  # Centerness conv
 
         # Replace "pass" statement with your code
-        self.pred_cls = nn.Conv2d(stem_channels[0], num_classes, 3, padding="same")
-        self.pred_box = nn.Conv2d(stem_channels[1], 4, 3, padding="same")
-        self.pred_ctr = nn.Conv2d(stem_channels[1], 1, 3, padding="same")
+        self.pred_cls = nn.Conv2d(stem_channels[-1], num_classes, 3, padding="same")
+        self.pred_box = nn.Conv2d(stem_channels[-1], 4, 3, padding="same")
+        self.pred_ctr = nn.Conv2d(stem_channels[-1], 1, 3, padding="same")
+
+        init_weights(self.pred_cls)
+        init_weights(self.pred_box)
+        init_weights(self.pred_ctr)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -769,19 +786,44 @@ class FCOS(nn.Module):
             )
             # Step 1:
             # Replace "pass" statement with your code
-            pass
+            device = images.device
+            N = level_pred_scores.shape[0]
+            idx1 = torch.arange(N, device=device)
+            predict_idx = torch.argmax(level_pred_scores, dim=1)
+            level_pred_scores = level_pred_scores[idx1, predict_idx]
+            #import pdb; pdb.set_trace()
 
             # Step 2:
             # Replace "pass" statement with your code
-            pass
+            mask = (level_pred_scores > test_score_thresh)
+            level_pred_scores = level_pred_scores[mask]
+            level_pred_classes = predict_idx[mask]
+            #import pdb; pdb.set_trace()
+
 
             # Step 3:
             # Replace "pass" statement with your code
-            pass
+            valid_deltas = level_deltas[mask]
+            valid_locations = level_locations[mask]
+            level_pred_boxes = fcos_apply_deltas_to_locations(
+                valid_deltas, 
+                valid_locations, 
+                stride=self.backbone.fpn_strides[level_name]
+            )
+            #import pdb; pdb.set_trace()
 
             # Step 4: Use `images` to get (height, width) for clipping.
             # Replace "pass" statement with your code
-            pass
+            _, _, H, W = images.shape
+            #idx1 = torch.arange(level_pred_boxes.shape[0], device=device)
+            X = level_pred_boxes[:, 0:4:2]
+            Y = level_pred_boxes[:, 1:5:2]
+            #import pdb; pdb.set_trace()
+            X = torch.clamp(X, min=0, max=W)
+            Y = torch.clamp(Y, min=0, max=H)
+            level_pred_boxes[:, 0:4:2] = X
+            level_pred_boxes[:, 1:5:2] = Y
+            #import pdb; pdb.set_trace()
             ##################################################################
             #                          END OF YOUR CODE                      #
             ##################################################################
